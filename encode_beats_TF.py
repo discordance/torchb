@@ -14,7 +14,7 @@ beats = list(collection.find({'class':6,
                               'bar': 128,
                               'gridicity': {'$lt': 0.5},
                               'diversity': {'$gt': 0.07}
-                              }).limit(104))
+                              }))
 
 # decompress in numpy
 alll = []
