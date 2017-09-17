@@ -13,9 +13,9 @@ collection = db.origset
 
 beats = list(collection.find({'class':6,
                               'bar': 128,
-                              'density': {'$gt':0.02},
+                              'density': {'$gt':0.01},
                               'diversity': {'$gt': 0.07},
-                              'gridicity': {'$lt': 0.5}
+                              'gridicity': {'$lt': 0.75}
                               }))
 
 # select random
@@ -37,11 +37,11 @@ print bincopy.shape
 
 # get only uniques
 uniques, idxs = np.unique(bincopy, axis=0, return_index=True)
-# alll_f = alll[idxs]
-alll_f = bincopy
+alll_f = alll[idxs]
+# alll_f = bincopy
 # reshape to fit
 # alll_f = alll_f.reshape((alll_f.shape[0],alll_f.shape[1]*20,))
-alll_f = alll_f.reshape((alll_f.shape[0],alll_f.shape[1]*15,))
+alll_f = alll_f.reshape((alll_f.shape[0],alll_f.shape[1]*20,))
 # okay
 print "dataset: ", alll_f.shape
 
@@ -59,12 +59,12 @@ batch_size = 64
 display_step = 2000
 
 # Network Parameters
-num_hidden_1 = 768 # 1st layer num features
+num_hidden_1 = 896 # 1st layer num features
 num_hidden_2 = 128  # 2nd layer num features
 num_input = alll_f.shape[1]
 
 # tf Graph input (only pictures)
-X = tf.placeholder("float", [None, num_input])
+X = tf.placeholder("float", [None, num_input],  name='input_layer')
 is_training = tf.placeholder(tf.bool, name='is_training')
 
 weights = {
@@ -89,7 +89,7 @@ def encoder(x):
     # Encoder Hidden layer
     l2_op = tf.add(tf.matmul(layer_1, weights['encoder_h2']), biases['encoder_b2'])
     layer_2 = tf.nn.relu(l2_op)
-    layer_2 = tf.layers.dropout(layer_2, 0.5)
+    layer_2 = tf.layers.dropout(layer_2, 0.25)
 
     return layer_2
 
@@ -99,7 +99,7 @@ def decoder(x):
     # Decoder Hidden layer
     l1_op = tf.add(tf.matmul(x, weights['decoder_h1']),biases['decoder_b1'])
     layer_1 = tf.nn.relu(l1_op)
-    layer_1 = tf.layers.dropout(layer_1, 0.5)
+    layer_1 = tf.layers.dropout(layer_1, 0.25)
 
     # Decoder Out layer
     layer_2 = tf.add(tf.matmul(layer_1, weights['decoder_h2']),biases['decoder_b2'])
@@ -107,8 +107,10 @@ def decoder(x):
 
 
 # Construct model
-encoder_op = encoder(X)
-decoder_op = decoder(encoder_op)
+encoder_op = tf.identity(encoder(X), name="encoder_op")
+decoder_op = tf.identity(decoder(encoder_op), name="decoder_op")
+
+
 
 # Prediction
 y_pred = decoder_op
@@ -171,6 +173,6 @@ with tf.Session() as sess:
         if i % (display_step) == 0:
             g = sess.run(decoder_op, feed_dict={X: val_x, is_training: 0})
             print "ORIG: \n"
-            print utils.draw(val_x[0].reshape((128,15)))
+            print utils.draw(val_x[0].reshape((128,20)))
             print "REBUILD: \n"
-            print utils.draw(g[0].reshape((128,15))) + "\n"
+            print utils.draw(g[0].reshape((128,20))) + "\n"
