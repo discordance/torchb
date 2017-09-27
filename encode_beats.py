@@ -6,6 +6,15 @@ import utils
 import numpy as np
 import tensorflow as tf
 
+from tensorflow.python.framework import ops
+
+
+def selu(x):
+    with ops.name_scope('elu') as scope:
+        alpha = 1.6732632423543772848170429916717
+        scale = 1.0507009873554804934193349852946
+        return scale*tf.where(x>=0.0, x, alpha*tf.nn.elu(x))
+
 # database
 client = MongoClient('localhost', 27017)
 db = client.bheat
@@ -20,7 +29,6 @@ beats = list(collection.find({'class':6,
 
 # select random
 shuffle(beats)
-# beats = beats[:20]
 
 # decompress in numpy
 alll = []
@@ -29,19 +37,13 @@ for i, beat in enumerate(beats):
     for j, np_bar in enumerate(np_beat):
         alll.append(np_bar)
 alll = np.array(alll)
-print alll.shape
+print "before:", alll.shape
 
-# get only the binary perc part of the beat
-bincopy = alll[:,:,:15]
-print bincopy.shape
 
-# get only uniques
-uniques, idxs = np.unique(bincopy, axis=0, return_index=True)
-alll_f = alll[idxs]
-# alll_f = bincopy
-# reshape to fit
-# alll_f = alll_f.reshape((alll_f.shape[0],alll_f.shape[1]*20,))
-alll_f = alll_f.reshape((alll_f.shape[0],alll_f.shape[1]*20,))
+alll = utils.clean_and_unique_beats(alll)
+print "after:", alll.shape
+
+alll_f = alll.reshape((alll.shape[0],alll.shape[1]*20,))
 # okay
 print "dataset: ", alll_f.shape
 
@@ -56,15 +58,17 @@ learning_rate = 0.0001
 num_steps = 200000
 batch_size = 64
 
-display_step = 2000
+display_step = 5000
 
 # Network Parameters
-num_hidden_1 = 896 # 1st layer num features
-num_hidden_2 = 128  # 2nd layer num features
+num_hidden_1 = 1024 # 1st layer num features
+num_hidden_2 = 256  # 2nd layer num features
 num_input = alll_f.shape[1]
 
 # tf Graph input (only pictures)
 X = tf.placeholder("float", [None, num_input],  name='input_layer')
+# Xcoded = tf.placeholder("float", [None, num_hidden_2],  name='coded_input_layer')
+
 is_training = tf.placeholder(tf.bool, name='is_training')
 
 weights = {
@@ -74,22 +78,22 @@ weights = {
     'decoder_h2': tf.get_variable("decoder_h2", shape=[num_hidden_1, num_input], initializer=tf.contrib.layers.xavier_initializer()),
 }
 biases = {
-    'encoder_b1': tf.get_variable("encoder_b1", shape=[num_hidden_1], initializer=tf.contrib.layers.xavier_initializer()),
-    'encoder_b2': tf.get_variable("encoder_b2", shape=[num_hidden_2], initializer=tf.contrib.layers.xavier_initializer()),
-    'decoder_b1': tf.get_variable("decoder_b1", shape=[num_hidden_1], initializer=tf.contrib.layers.xavier_initializer()),
-    'decoder_b2': tf.get_variable("decoder_b2", shape=[num_input], initializer=tf.contrib.layers.xavier_initializer()),
+    'encoder_b1': tf.get_variable("encoder_b1", shape=[num_hidden_1], initializer=tf.zeros_initializer()),
+    'encoder_b2': tf.get_variable("encoder_b2", shape=[num_hidden_2], initializer=tf.zeros_initializer()),
+    'decoder_b1': tf.get_variable("decoder_b1", shape=[num_hidden_1], initializer=tf.zeros_initializer()),
+    'decoder_b2': tf.get_variable("decoder_b2", shape=[num_input], initializer=tf.zeros_initializer()),
 }
 
 # Building the encoder
 def encoder(x):
     # Encoder Input layer
     l1_op = tf.add(tf.matmul(x, weights['encoder_h1']), biases['encoder_b1'])
-    layer_1 = tf.nn.relu(l1_op)
+    layer_1 = selu(l1_op)
+    layer_1 = tf.layers.dropout(layer_1, 0.5, training=is_training)
 
     # Encoder Hidden layer
     l2_op = tf.add(tf.matmul(layer_1, weights['encoder_h2']), biases['encoder_b2'])
-    layer_2 = tf.nn.relu(l2_op)
-    layer_2 = tf.layers.dropout(layer_2, 0.25)
+    layer_2 = tf.nn.sigmoid(l2_op)
 
     return layer_2
 
@@ -97,12 +101,14 @@ def encoder(x):
 # Building the decoder
 def decoder(x):
     # Decoder Hidden layer
-    l1_op = tf.add(tf.matmul(x, weights['decoder_h1']),biases['decoder_b1'])
-    layer_1 = tf.nn.relu(l1_op)
-    layer_1 = tf.layers.dropout(layer_1, 0.25)
+    l1_op = tf.add(tf.matmul(x, weights['decoder_h1']), biases['decoder_b1'])
+    layer_1 = selu(l1_op)
+    layer_1 = tf.layers.dropout(layer_1, 0.5, training=is_training)
 
     # Decoder Out layer
     layer_2 = tf.add(tf.matmul(layer_1, weights['decoder_h2']),biases['decoder_b2'])
+    # clamp
+    # layer_2 = tf.clip_by_value(layer_2, 0.0, 1.0)
     return layer_2
 
 
@@ -110,7 +116,7 @@ def decoder(x):
 encoder_op = tf.identity(encoder(X), name="encoder_op")
 decoder_op = tf.identity(decoder(encoder_op), name="decoder_op")
 
-
+normalized_output = tf.identity(tf.clip_by_value(decoder_op, 0, 1), name="normalized_output")
 
 # Prediction
 y_pred = decoder_op
@@ -124,7 +130,7 @@ accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 # Define loss and optimizer
 def loss_func():
     cross_ent = tf.nn.sigmoid_cross_entropy_with_logits(labels=y_true, logits=y_pred)
-    return tf.reduce_mean(cross_ent)
+    return tf.reduce_mean(cross_ent)*10 #scale
 
 loss = loss_func()
 optimizer = tf.train.AdamOptimizer(learning_rate).minimize(loss)
@@ -171,8 +177,13 @@ with tf.Session() as sess:
             print('Step %i: Minibatch Loss: %f, Acc: %f, Valid Loss: %f' % (i, l, acc, vl))
 
         if i % (display_step) == 0:
+            e = sess.run(encoder_op, feed_dict={X: val_x, is_training: 0})
             g = sess.run(decoder_op, feed_dict={X: val_x, is_training: 0})
             print "ORIG: \n"
             print utils.draw(val_x[0].reshape((128,20)))
+            print val_x[0].reshape((128,20))
             print "REBUILD: \n"
             print utils.draw(g[0].reshape((128,20))) + "\n"
+            print g[0].reshape((128,20))
+            print g[0].reshape((128,20))[0][15:]
+            # print e[0]

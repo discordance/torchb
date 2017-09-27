@@ -1,15 +1,24 @@
 import tensorflow as tf
 import numpy as np
 import os
+from tensorflow.python.framework import ops
 
 
-mb_size = 128
-X_dim = 128 # input dim
-z_dim = 64 # noise dim
-h_dim = 64 # hiden dim
+def selu(x):
+    with ops.name_scope('elu') as scope:
+        alpha = 1.6732632423543772848170429916717
+        scale = 1.0507009873554804934193349852946
+        return scale*tf.where(x>=0.0, x, alpha*tf.nn.elu(x))
+
+mb_size = 64
+X_dim = 128
+z_dim = 64
+h_dim = 256
 lr = 1e-4
-d_steps = 2
-
+m = 5
+lam = 1e-3
+gamma = 0.5
+k_curr = 0
 
 # load data
 #
@@ -26,37 +35,37 @@ def xavier_init(size):
 
 X = tf.placeholder(tf.float32, shape=[None, X_dim], name="input_layer")
 z = tf.placeholder(tf.float32, shape=[None, z_dim], name="noise_layer")
+k = tf.placeholder(tf.float32, name="k_layer")
 
 D_W1 = tf.Variable(xavier_init([X_dim, h_dim]), name="d_w1") # layer 1 weight discriminator
 D_b1 = tf.Variable(tf.zeros(shape=[h_dim]), name="d_b1") # layer 1 bias discriminator
 D_W2 = tf.Variable(xavier_init([h_dim, 1]), name="d_w2") # layer 2 weight discriminator
 D_b2 = tf.Variable(tf.zeros(shape=[1]), name="d_b2") # layer 2 bias discriminator
 
-G_W1 = tf.Variable(xavier_init([z_dim, h_dim*2]), name="g_w1") # layer 1 weight generator
-G_b1 = tf.Variable(tf.zeros(shape=[h_dim*2]), name="g_b1") # layer 1 bias generator
-G_W2 = tf.Variable(xavier_init([h_dim*2, X_dim]), name="g_w2") # layer 2 weight generator
+G_W1 = tf.Variable(xavier_init([z_dim, h_dim]), name="g_w1") # layer 1 weight generator
+G_b1 = tf.Variable(tf.zeros(shape=[h_dim]), name="g_b1") # layer 1 bias generator
+G_W2 = tf.Variable(xavier_init([h_dim, X_dim]), name="g_w2") # layer 2 weight generator
 G_b2 = tf.Variable(tf.zeros(shape=[X_dim]), name="g_b2") # layer 2 bias generator
 
 theta_G = [G_W1, G_W2, G_b1, G_b2]
 theta_D = [D_W1, D_W2, D_b1, D_b2]
 
-
 def sample_z(m, n):
-    return np.random.uniform(-1., 1., size=[m, n])
+    return np.random.uniform(0., 1., size=[m, n])
 
 
 def generator(z):
-    G_h1 = tf.nn.relu(tf.matmul(z, G_W1) + G_b1)
+    G_h1 = selu(tf.matmul(z, G_W1) + G_b1)
     G_log_prob = tf.matmul(G_h1, G_W2) + G_b2
     G_prob = tf.nn.sigmoid(G_log_prob)
     return G_prob
 
 
 def discriminator(x):
-    D_h1 = tf.nn.relu(tf.matmul(x, D_W1) + D_b1)
+    D_h1 = selu(tf.matmul(x, D_W1) + D_b1)
     D_h1 = tf.layers.dropout(D_h1, 0.25, training=True)
-    out = tf.matmul(D_h1, D_W2) + D_b2
-    return out
+    X_recon = tf.matmul(D_h1, D_W2) + D_b2
+    return tf.reduce_mean(tf.reduce_sum((x - X_recon)**2, 1))
 
 
 G_sample = tf.identity(generator(z), name="generator")
@@ -64,11 +73,12 @@ G_sample = tf.identity(generator(z), name="generator")
 D_real = discriminator(X)
 D_fake = discriminator(G_sample)
 
-D_loss = 0.5 * (tf.reduce_mean((D_real - 1)**2) + tf.reduce_mean(D_fake**2))
-G_loss = 0.5 * tf.reduce_mean((D_fake - 1)**2)
+D_loss = D_real - k*D_fake
+G_loss = D_fake
 
 tf.summary.scalar("D_loss", D_loss)
 tf.summary.scalar("G_loss", G_loss)
+
 
 D_solver = (tf.train.AdamOptimizer(learning_rate=lr)
             .minimize(D_loss, var_list=theta_D))
@@ -94,29 +104,28 @@ summary_op = tf.summary.merge_all()
 
 # :D
 for it in range(1000000):
-    for _ in range(d_steps):
-        X_mb = next_batch(mb_size, normalized)
-        z_mb = sample_z(mb_size, z_dim)
-
-        _, D_loss_curr = sess.run(
-            [D_solver, D_loss],
-            feed_dict={X: X_mb, z: z_mb}
-        )
 
     X_mb = next_batch(mb_size, normalized)
-    z_mb = sample_z(mb_size, z_dim)
+    _, D_real_curr, summary = sess.run(
+        [D_solver, D_real, summary_op],
+        feed_dict={X: X_mb, z: sample_z(mb_size, z_dim), k: k_curr}
+    )
 
-    _, G_loss_curr, summary = sess.run(
-        [G_solver, G_loss, summary_op],
+    _, D_fake_curr = sess.run(
+        [G_solver, D_fake],
         feed_dict={X: X_mb, z: sample_z(mb_size, z_dim)}
     )
 
     # write log
     writer.add_summary(summary, it)
 
-    if it % 10000 == 0:
-        print('Epoq: {:.2}; D_loss: {:.4}; G_loss: {:.4}'.format(float(it*mb_size)/float(len(normalized)), D_loss_curr, G_loss_curr))
+    X_mb = next_batch(mb_size, normalized)
+    z_mb = sample_z(mb_size, z_dim)
+    k_curr = k_curr + lam * (gamma*D_real_curr - D_fake_curr)
 
-        samples = sess.run(G_sample, feed_dict={z: sample_z(64, z_dim)})
-        # denormalize !!!
+    if it % 1000 == 0:
+        measure = D_real_curr + np.abs(gamma*D_real_curr - D_fake_curr)
+
+        print('{}; Convergence: {:.4}, D_loss: {:.4}; G_loss: {:.4}'.format(it, measure, D_real_curr, D_fake_curr))
+        samples = sess.run(G_sample, feed_dict={z: sample_z(16, z_dim)})
         np.save("generated/jazz1/gen%f.npy"%it, samples*np.max(encoded_data))

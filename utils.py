@@ -275,3 +275,42 @@ def np_seq2mid(np_seq):
     mf.ticksPerQuarterNote = TICKS_PER_Q  # cannot use: 10080
     mf.tracks.append(mt)
     return mf
+
+def augment(beats):
+        """
+        basic data augmentation
+        """
+        a = beats[:,:64,:]
+        b = beats[:,64:,:]
+        t1 = np.concatenate((b, a), axis=1)
+        a = beats[:,:32,:]
+        b = beats[:,32:64,:]
+        c = beats[:,64:96,:]
+        d = beats[:,64:96,:]
+        t2 = np.concatenate((a,d,c,b), axis=1)
+        t3 = np.concatenate((c,d,a,b), axis=1)
+        return np.concatenate((t1, t2, t3), axis=0)
+
+def clean_and_unique_beats(beats):
+    """
+    clean beats to have a good dataset before ML algos
+    input is in the form of np.array(n x 128 x 20)
+    """
+    # UNIQUES
+    bincopy = beats[:,:,:15]
+    # get only uniques
+    uniques, idxs = np.unique(bincopy, axis=0, return_index=True)
+    beats_uniques = beats[idxs]
+
+    # INTREDASTINGS
+    valids = []
+    # check thoses bytes
+    for b in beats_uniques:
+        b1 = b[:64,:]
+        b2 = b[64:,:]
+        m1 = np.mean(b1)
+        m2 = np.mean(b2)
+        if m1 > 0 and m2 > 0 and b1[0][0] == 1 and np.mean(b) > 0.0075:
+            valids.append(b)
+
+    return np.concatenate((np.array(valids), augment(np.array(valids))), axis=0)
