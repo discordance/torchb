@@ -20,12 +20,11 @@ client = MongoClient('localhost', 27017)
 db = client.bheat
 collection = db.origset
 
-beats = list(collection.find({'class':6,
+beats = list(collection.find({ '$or':[{'class':6},{'class':3}],
                               'bar': 128,
-                              'density': {'$gt':0.01},
-                              'diversity': {'$gt': 0.07},
-                              'gridicity': {'$lt': 0.75}
-                              }))
+                              'diversity': {'$gt': 0.08},
+                              'gridicity': {'$lt': 0.75},
+                              }).limit(100))
 
 # select random
 shuffle(beats)
@@ -39,11 +38,14 @@ for i, beat in enumerate(beats):
 alll = np.array(alll)
 print "before:", alll.shape
 
+# downsample
+alll = utils.map2twelve(alll)
+print "down-sampled:", alll.shape
 
 alll = utils.clean_and_unique_beats(alll)
 print "after:", alll.shape
 
-alll_f = alll.reshape((alll.shape[0],alll.shape[1]*20,))
+alll_f = alll.reshape((alll.shape[0],alll.shape[1]*12,))
 # okay
 print "dataset: ", alll_f.shape
 
@@ -54,11 +56,11 @@ val_size = (alll_f.shape[0]/4)
 print "train/valid sets size: ", train_size, val_size, "\n"
 
 # Training Parameters
-learning_rate = 0.0001
-num_steps = 200000
-batch_size = 64
+learning_rate = 1e-5
+num_steps = 500000
+batch_size = 128
 
-display_step = 5000
+display_step = 1000
 
 # Network Parameters
 num_hidden_1 = 1024 # 1st layer num features
@@ -89,7 +91,7 @@ def encoder(x):
     # Encoder Input layer
     l1_op = tf.add(tf.matmul(x, weights['encoder_h1']), biases['encoder_b1'])
     layer_1 = selu(l1_op)
-    layer_1 = tf.layers.dropout(layer_1, 0.5, training=is_training)
+    layer_1 = tf.layers.dropout(layer_1, 0.33, training=is_training)
 
     # Encoder Hidden layer
     l2_op = tf.add(tf.matmul(layer_1, weights['encoder_h2']), biases['encoder_b2'])
@@ -103,7 +105,7 @@ def decoder(x):
     # Decoder Hidden layer
     l1_op = tf.add(tf.matmul(x, weights['decoder_h1']), biases['decoder_b1'])
     layer_1 = selu(l1_op)
-    layer_1 = tf.layers.dropout(layer_1, 0.5, training=is_training)
+    layer_1 = tf.layers.dropout(layer_1, 0.33, training=is_training)
 
     # Decoder Out layer
     layer_2 = tf.add(tf.matmul(layer_1, weights['decoder_h2']),biases['decoder_b2'])
@@ -152,6 +154,11 @@ def next_batch(num, data):
 # saver
 saver = tf.train.Saver()
 
+
+# create log file
+fl = open("logs/autoencoder.csv", "a+")
+fl.write("it, train, val, acc \n")
+fl.close()
 # Start Training
 # Start a new TF session
 with tf.Session() as sess:
@@ -175,15 +182,19 @@ with tf.Session() as sess:
 
         if i % (display_step/32) == 0:
             print('Step %i: Minibatch Loss: %f, Acc: %f, Valid Loss: %f' % (i, l, acc, vl))
+            #
+            fl = open("logs/autoencoder.csv", "a+")
+            fl.write("%i, %f, %f, %f \n"%(i, l, vl, acc))
+            fl.close()
 
         if i % (display_step) == 0:
             e = sess.run(encoder_op, feed_dict={X: val_x, is_training: 0})
             g = sess.run(decoder_op, feed_dict={X: val_x, is_training: 0})
             print "ORIG: \n"
-            print utils.draw(val_x[0].reshape((128,20)))
-            print val_x[0].reshape((128,20))
+            print utils.draw(val_x[0].reshape((128,12)))
+            print val_x[0].reshape((128,12))
             print "REBUILD: \n"
-            print utils.draw(g[0].reshape((128,20))) + "\n"
-            print g[0].reshape((128,20))
-            print g[0].reshape((128,20))[0][15:]
+            print utils.draw(g[0].reshape((128,12))) + "\n"
+            print g[0].reshape((128,12))
+            print g[0].reshape((128,12))[0][8:]
             # print e[0]

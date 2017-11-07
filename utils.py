@@ -58,10 +58,10 @@ EIGHT_MAP = {
 
 def map2twelve(seqs):
     """
-    maps MxNx20 sequences to MxNx11 sequences
+    maps MxNx20 sequences to MxNx12 sequences
     from 15 percs and 5 vel groups to 8 percs and 4 vel groups
     :param seqs: array of sequences to be converted
-    :return: MxNx11 numpy sequence
+    :return: MxNx12 numpy sequence
     """
     def pmap(s, mem):
         nstep = np.zeros(12)
@@ -296,6 +296,7 @@ def clean_and_unique_beats(beats):
     clean beats to have a good dataset before ML algos
     input is in the form of np.array(n x 128 x 20)
     """
+
     # UNIQUES
     bincopy = beats[:,:,:15]
     # get only uniques
@@ -305,12 +306,13 @@ def clean_and_unique_beats(beats):
     # INTREDASTINGS
     valids = []
     # check thoses bytes
-    for b in beats_uniques:
+    for b in tqdm(beats_uniques, 'clean beats'):
         b1 = b[:64,:]
         b2 = b[64:,:]
         m1 = np.mean(b1)
         m2 = np.mean(b2)
-        if m1 > 0 and m2 > 0 and b1[0][0] == 1 and np.mean(b) > 0.0075:
+        # if m1 > 0 and m2 > 0 and b1[0][0] == 1 and np.mean(b) > 0.008:
+        if m1 > 0 and m2 > 0 and b1[0][0] == 1 and np.mean(b) > 0.009:
             valids.append(b)
 
     return np.concatenate((np.array(valids), augment(np.array(valids))), axis=0)

@@ -12,11 +12,9 @@ client = MongoClient('localhost', 27017)
 db = client.bheat
 collection = db.origset
 
-beats = list(collection.find({'class':6,
+beats = list(collection.find({ '$or':[{'class':6},{'class':3}],
                               'bar': 128,
-                              'density': {'$gt':0.01},
                               'diversity': {'$gt': 0.07},
-                              'gridicity': {'$lt': 0.75}
                               }))
 
 # select random
@@ -39,7 +37,7 @@ print "dataset: ", alll_f.shape
 print "load the model"
 with tf.Session() as sess:
     with tf.device("/cpu:0"):
-        saver = tf.train.import_meta_graph('encoded/jazz1/model_160000_0.004907.tb.meta')
+        saver = tf.train.import_meta_graph('encoded/jazz1/model_25000_0.075606.tb.meta')
         saver.restore(sess, tf.train.latest_checkpoint('encoded/jazz1/'))
         graph = tf.get_default_graph()
         is_training = graph.get_tensor_by_name("is_training:0")

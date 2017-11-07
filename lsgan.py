@@ -4,9 +4,9 @@ import os
 
 
 mb_size = 128
-X_dim = 128 # input dim
-z_dim = 64 # noise dim
-h_dim = 64 # hiden dim
+X_dim = 256 # input dim
+z_dim = 128 # noise dim
+h_dim = 128 # hiden dim
 lr = 1e-4
 d_steps = 2
 
@@ -16,7 +16,6 @@ d_steps = 2
 encoded_data = np.load("encoded/jazz1.npy")
 
 print "loaded data", encoded_data.shape
-normalized = (encoded_data-np.min(encoded_data))/(np.max(encoded_data)-np.min(encoded_data))
 
 def xavier_init(size):
     in_dim = size[0]
@@ -95,7 +94,7 @@ summary_op = tf.summary.merge_all()
 # :D
 for it in range(1000000):
     for _ in range(d_steps):
-        X_mb = next_batch(mb_size, normalized)
+        X_mb = next_batch(mb_size, encoded_data)
         z_mb = sample_z(mb_size, z_dim)
 
         _, D_loss_curr = sess.run(
@@ -103,7 +102,7 @@ for it in range(1000000):
             feed_dict={X: X_mb, z: z_mb}
         )
 
-    X_mb = next_batch(mb_size, normalized)
+    X_mb = next_batch(mb_size, encoded_data)
     z_mb = sample_z(mb_size, z_dim)
 
     _, G_loss_curr, summary = sess.run(
@@ -115,8 +114,8 @@ for it in range(1000000):
     writer.add_summary(summary, it)
 
     if it % 10000 == 0:
-        print('Epoq: {:.2}; D_loss: {:.4}; G_loss: {:.4}'.format(float(it*mb_size)/float(len(normalized)), D_loss_curr, G_loss_curr))
+        print('Iter: {}; D_loss: {:.4}; G_loss: {:.4}'.format(it, D_loss_curr, G_loss_curr))
 
         samples = sess.run(G_sample, feed_dict={z: sample_z(64, z_dim)})
         # denormalize !!!
-        np.save("generated/jazz1/gen%f.npy"%it, samples*np.max(encoded_data))
+        np.save("generated/jazz1/gen%f.npy"%it, samples)
